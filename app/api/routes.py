@@ -3,11 +3,16 @@ API routes for DermaGPT chat endpoint.
 """
 
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.schemas import ChatRequest, ChatResponse, HealthResponse, Source
+from app.db.database import get_db
+from app.db.models import User
+from app.auth.dependencies import get_current_user
+from app.services.conversation_service import ConversationService
 
 
 router = APIRouter()
@@ -27,9 +32,13 @@ def set_orchestrator(orch):
     response_model=ChatResponse,
     status_code=status.HTTP_200_OK,
     summary="Chat with DermaGPT",
-    description="Send a skincare query and get recommendations or information from specialized agents",
+    description="Send a skincare query and get recommendations or information from specialized agents (requires authentication)",
 )
-async def chat(request: ChatRequest) -> ChatResponse:
+async def chat(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ChatResponse:
     """
     Process a chat query through the multi-agent system.
 
@@ -39,7 +48,9 @@ async def chat(request: ChatRequest) -> ChatResponse:
     - **Supervisor Agent**: For general queries requiring web search
 
     Args:
-        request: ChatRequest with query and optional session_id
+        request: ChatRequest with query and optional conversation_id
+        current_user: Authenticated user
+        db: Database session
 
     Returns:
         ChatResponse with agent's answer, sources, and metadata
@@ -51,10 +62,40 @@ async def chat(request: ChatRequest) -> ChatResponse:
         )
 
     try:
-        # Process the query
+        # Get conversation service
+        conv_service = ConversationService(db)
+        
+        # Parse conversation_id from session_id if provided
+        conversation_id: Optional[int] = None
+        if request.session_id:
+            try:
+                conversation_id = int(request.session_id)
+            except ValueError:
+                pass  # If it's not a valid int, ignore it
+        
+        # Get or create active conversation
+        conversation = await conv_service.get_or_create_active_conversation(
+            user=current_user,
+            conversation_id=conversation_id,
+        )
+        
+        # Get conversation history for context
+        chat_history = await conv_service.get_conversation_history_for_agent(
+            conversation=conversation,
+            limit=10,
+        )
+        
+        # Save user message
+        user_message = await conv_service.add_message(
+            conversation=conversation,
+            role="user",
+            content=request.query,
+        )
+        
+        # Process the query with orchestrator
         result = orchestrator.process_query(
             query=request.query,
-            chat_history=None,  # TODO: Implement session-based history
+            chat_history=chat_history if chat_history else None,
         )
 
         # Convert sources to Source objects
@@ -64,21 +105,40 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 sources.append(Source(**src))
             else:
                 sources.append(src)
+        
+        # Save assistant response
+        assistant_message = await conv_service.add_message(
+            conversation=conversation,
+            role="assistant",
+            content=result.get("response", "No response generated"),
+            sources=[src.model_dump() if hasattr(src, 'model_dump') else src for src in sources],
+            agent_used=result.get("agent_used", "unknown"),
+        )
 
         # Create response
         response = ChatResponse(
             response=result.get("response", "No response generated"),
             agent_used=result.get("agent_used", "unknown"),
             sources=sources,
-            session_id=request.session_id,
+            session_id=str(conversation.id),
+            conversation_id=conversation.id,
+            message_id=assistant_message.id,
             error=result.get("error"),
         )
 
         return response
 
+    except ValueError as e:
+        # Handle conversation not found
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
     except Exception as e:
         # Log the error
         print(f"❌ Error in chat endpoint: {e}")
+        import traceback
+        traceback.print_exc()
 
         # Return error response
         raise HTTPException(
