@@ -1,0 +1,2 @@
+# DermaGPT RAG Application
+
