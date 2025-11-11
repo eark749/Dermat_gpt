@@ -139,6 +139,23 @@ class ConversationService:
         conversation.last_active_at = datetime.utcnow()
         conversation.updated_at = datetime.utcnow()
         
+        # Auto-generate title from first user message
+        if role == "user" and conversation.title == "New Conversation":
+            # Check if this is the first message in the conversation
+            result = await self.db.execute(
+                select(func.count(Message.id))
+                .where(Message.conversation_id == conversation.id)
+            )
+            message_count = result.scalar()
+            
+            # Only update title if this is the first message
+            if message_count == 0:
+                # Use first 50 characters of the message as title
+                title = content[:50].strip()
+                if len(content) > 50:
+                    title += "..."
+                conversation.title = title
+        
         self.db.add(message)
         await self.db.commit()
         await self.db.refresh(message)
