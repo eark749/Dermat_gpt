@@ -150,24 +150,12 @@ Dermat_gpt/
 
 ## Features
 
-- 🤖 **Multi-Agent System**: Product, Blog, and Supervisor agents
-- 🔍 **RAG (Retrieval Augmented Generation)**: Vector search with Pinecone
-- 🔐 **JWT Authentication**: Secure user authentication
-- 💬 **Chat History**: Persistent conversation management
-- 🌐 **Web Search Integration**: Real-time information retrieval
-- 📊 **PostgreSQL Database**: Async database operations
-
----
-
-## Requirements
-
-- Python 3.8+
-- PostgreSQL 15
-- OpenAI API Key
-- Pinecone API Key
-- macOS (or Linux/Windows with modifications)
-
----
+- **Multi-Agent System**: Product, Blog, and Supervisor agents
+- **RAG (Retrieval Augmented Generation)**: Vector search with Pinecone
+- **JWT Authentication**: Secure user authentication
+- **Chat History**: Persistent conversation management
+- **Web Search Integration**: Real-time information retrieval
+- **PostgreSQL Database**: Async database operations
 
 For detailed setup instructions, see [SETUP.md](SETUP.md)
 
