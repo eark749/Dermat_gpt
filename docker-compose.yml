@@ -7,7 +7,7 @@ services:
     container_name: dermagpt-postgres
     environment:
       POSTGRES_DB: ${DATABASE_NAME:-dermagpt}
-      POSTGRES_USER: ${DATABASE_USER:-dermagpt_user}
+      POSTGRES_USER: ${DATABASE_USER:-postgres}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-dermagpt_password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
