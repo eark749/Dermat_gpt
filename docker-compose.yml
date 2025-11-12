@@ -1,0 +1,125 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: dermagpt-postgres
+    environment:
+      POSTGRES_DB: ${DATABASE_NAME:-dermagpt}
+      POSTGRES_USER: ${DATABASE_USER:-dermagpt_user}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-dermagpt_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "${DATABASE_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USER:-dermagpt_user} -d ${DATABASE_NAME:-dermagpt}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - dermagpt-network
+
+  # Redis (optional - for caching)
+  redis:
+    image: redis:7-alpine
+    container_name: dermagpt-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - dermagpt-network
+
+  # DermaGPT FastAPI Application
+  dermagpt-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dermagpt-api
+    environment:
+      # Database Configuration
+      DATABASE_URL: postgresql+asyncpg://${DATABASE_USER:-dermagpt_user}:${DATABASE_PASSWORD:-dermagpt_password}@postgres:5432/${DATABASE_NAME:-dermagpt}
+      
+      # API Keys (must be provided via .env file)
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      SERPAPI_API_KEY: ${SERPAPI_API_KEY}
+      
+      # Pinecone Configuration
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME:-dermagpt-rag}
+      PINECONE_ENVIRONMENT: ${PINECONE_ENVIRONMENT:-us-east-1}
+      
+      # OpenAI Configuration
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-3.5-turbo}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-large}
+      EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-1024}
+      
+      # JWT Configuration
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-super-secret-jwt-key-change-this-in-production}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-1440}
+      
+      # Application Configuration
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-false}
+      
+      # Redis Configuration (optional)
+      REDIS_URL: redis://redis:6379/0
+      
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - dermagpt-network
+
+  # Nginx Reverse Proxy (optional - for production)
+  nginx:
+    image: nginx:alpine
+    container_name: dermagpt-nginx
+    ports:
+      - "${NGINX_PORT:-80}:80"
+      - "${NGINX_SSL_PORT:-443}:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - dermagpt-api
+    restart: unless-stopped
+    networks:
+      - dermagpt-network
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  dermagpt-network:
+    driver: bridge
